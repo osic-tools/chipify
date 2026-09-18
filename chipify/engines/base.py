@@ -28,6 +28,10 @@ Contract
 ``stage_extra_files()``
     Optional hook: mirror engine-specific support files (e.g. OSDI compact
     models) into FAST_TMP before the sweep.
+``resolve_netlist_paths(netlist, test)``
+    Provided helper: rewrite relative ``.include``/``.lib``/``include`` paths
+    in a freshly-read deck to absolute, anchored on the testbench's own
+    directory (see :mod:`chipify.engines.netlist_paths`).
 ``run_log_tail(n_lines)``
     Optional: tail of the most recent ``run()``'s simulator log, used to
     attach a diagnostic to analysis-capture failures.
@@ -89,6 +93,32 @@ class BaseSimulator(ABC):
                               uses it to dump signals from the .raw file.
         """
         raise NotImplementedError
+
+    def resolve_netlist_paths(self, netlist: str, test=None) -> str:
+        """Absolutize relative include paths in a freshly-read deck.
+
+        Call this from ``generate_test_template`` on the raw netlist text,
+        before adding any engine-managed lines. Chipify never simulates a
+        netlist where it was authored — the deck is re-written into the scratch
+        dir — so an unrewritten relative path resolves against that scratch dir
+        and fails. Paths are resolved against the testbench's own directory;
+        bare filenames are left alone (they come from the ``work/`` staging).
+
+        Raises ``NetlistPathError`` naming every path that does not exist next
+        to the testbench; the orchestrator records that on
+        ``test.template_error`` so only this testbench fails. Override to a
+        no-op if your simulator has its own include-search mechanism.
+        """
+        # Imported lazily: chipify.engines must stay importable without pulling
+        # in settings, which creates the project folders at import time.
+        from chipify.engines.netlist_paths import (
+            absolutize_netlist_includes,
+            testbench_dir,
+        )
+        return absolutize_netlist_includes(
+            netlist, testbench_dir(test),
+            label=str(getattr(test, "tb_path", "") or ""),
+        )
 
     def stage_extra_files(self) -> None:
         """Optional hook: stage engine-specific files into FAST_TMP before a

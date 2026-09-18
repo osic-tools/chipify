@@ -6,6 +6,9 @@ Simulators run with ``cwd=FAST_TMP`` (RAM-backed on typical Linux/Docker
 setups), so model libraries and engine-specific support files must be
 mirrored there. Engine-specific extras are staged via each engine's
 ``stage_extra_files()`` hook.
+
+This module only *copies files*. Rewriting the paths written inside a netlist
+is the sibling concern and lives in :mod:`chipify.engines.netlist_paths`.
 """
 from __future__ import annotations
 

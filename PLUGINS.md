@@ -434,6 +434,7 @@ Unlike the GUI plugin types above, engines are discovered by the **engine regist
 |--------|----------|-------------|
 | `generate_test_template(test) -> str` | yes | Produce the Jinja2-ready netlist template for one testbench. Runs once per testbench in the main process, before the sweep. Xschem-based engines can call `chipify.engines.xschem.run_xschem(...)`. |
 | `run(netlist, timeout_sec=10, test=None, analysis_tab_paths=None) -> (output, error)` | yes | Execute one rendered netlist. Runs **inside a worker process**: no GUI access, no shared state. Return `("MY_DATA: <v0> <v1> …", None)` on success (values in `test.value_lst` order) or `(None, "<error>")` on failure. Respect `timeout_sec` and poll `chipify.engines.abort.is_aborted()` while the simulator runs. |
+| `resolve_netlist_paths(netlist, test=None) -> str` | provided | Base-class helper: rewrite relative `.include`/`.inc`/`.lib` (and `include`/`ahdl_include`/`load`) paths to absolute, anchored on the testbench's own directory. Call it on the raw deck in `generate_test_template` — chipify runs the deck from the scratch dir, so relative paths would otherwise resolve there. Bare filenames are left alone (they come from `work/` staging). Raises `NetlistPathError` if a path doesn't exist next to the testbench; the orchestrator records that on `test.template_error`. Override to a no-op if your simulator has its own include search path. |
 | `stage_extra_files()` | no | Hook to mirror engine-specific support files (compact models, …) into the scratch dir before the sweep. |
 | `run_log_tail(n_lines=25) -> str` | no | Tail of the last run's simulator log, attached to analysis-capture failure notes. |
 
@@ -457,7 +458,10 @@ class MySpiceEngine(BaseSimulator):
         run_xschem(tb)  # writes FAST_TMP/<stem>.spice
         stem = os.path.splitext(os.path.basename(tb))[0]
         with open(os.path.join(settings.FAST_TMP, stem + ".spice")) as fh:
-            return fh.read()
+            netlist = fh.read()
+        # Relative .include paths in the deck are resolved here; the deck runs
+        # from FAST_TMP, not from tb/.
+        return self.resolve_netlist_paths(netlist, test)
 
     def run(self, netlist, timeout_sec=10, test=None, analysis_tab_paths=None):
         path = os.path.join(settings.FAST_TMP, f"sim_{os.getpid()}.spice")

@@ -182,9 +182,19 @@ Authoring an imported netlist:
 - **vacask:** provide a `.sim` deck that writes a `.raw` consistent with the
   Spectre path; Chipify extracts scalars/waveforms from the `.raw` file (and any
   `measure:` expressions) in the datasheet.
-- **Model files** referenced via `.include`/`.lib` must resolve from the staged
-  scratch dir — put them in `work/` (`*.lib`/`*.mod`/`*.inc` are staged
-  automatically) and reference them by bare filename.
+- **Model files** referenced via `.include`/`.lib` can be given three ways:
+  - a **bare filename** (`.include models.lib`) — put the file in `work/`
+    (`*.lib`/`*.mod`/`*.inc` are staged into the scratch dir automatically);
+  - a **relative path** (`.include ../macros/amp.spice`) — resolved against the
+    directory of the testbench itself, and baked into the deck as an absolute
+    path before it runs. If the file isn't there, that testbench fails with an
+    error naming the path and the directory searched; the rest of the sweep
+    still runs;
+  - an **absolute path** — used as-is.
+
+  The same applies to `include` / `ahdl_include` / `load` in a vacask `.sim`
+  deck. Chipify runs the deck from a scratch dir, not from `tb/`, which is why
+  the relative paths have to be resolved up front.
 
 Re-running against pre-generated templates (the `--templates-dir` flag) still
 takes precedence over a per-testbench `source: netlist`.

@@ -353,12 +353,15 @@ class VacaskSimulator(BaseSimulator):
     def generate_test_template(self, test) -> str:
         # source="netlist" loads an existing deck at tb/<tb_path>.sim directly,
         # bypassing xschem entirely. VACASK captures results in run() from the
-        # .raw file / measure expressions, so the imported .sim is used verbatim
-        # — it must emit a .raw just like an xschem-produced spectre netlist would.
+        # .raw file / measure expressions, so the imported .sim is used as-is
+        # apart from include-path resolution below — it must emit a .raw just
+        # like an xschem-produced spectre netlist would.
         if getattr(test, "netlist_source", "xschem") == "netlist":
-            return safe_tb_file(
-                test.tb_path + self.netlist_ext
-            ).read_text(encoding="utf-8")
+            return self.resolve_netlist_paths(
+                safe_tb_file(test.tb_path + self.netlist_ext)
+                .read_text(encoding="utf-8"),
+                test,
+            )
 
         cfg = app_config.load_config()
         source = cfg.get("vacask_netlist_source", "xschem")
@@ -379,7 +382,10 @@ class VacaskSimulator(BaseSimulator):
             # No silent fallback — switch the setting to "ng2vc" to opt into that path.
             run_xschem(tb_path, netlist_mode="spectre")
 
-        return sim_file.read_text(encoding="utf-8")
+        # run() executes the deck from a per-worker subdir of FAST_TMP, one
+        # level below where relative paths in the deck were authored.
+        return self.resolve_netlist_paths(
+            sim_file.read_text(encoding="utf-8"), test)
 
     def run(self, netlist: str, timeout_sec: float = 10,
             test=None, analysis_tab_paths: dict | None = None) -> tuple:

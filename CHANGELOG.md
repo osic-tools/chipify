@@ -49,12 +49,27 @@ Preparation for the initial public release.
   via `settings.json`, falling back to the default structure when unset.
 
 ### Changed
+- Persisted netlist templates (netlist export and `--templates-dir`) now carry
+  absolute host paths for any include that was written relatively. They are
+  project- and machine-specific; regenerate them after moving a project or
+  upgrading past this version.
 - The `work_dir` project folder default was renamed `tmp/` → `work/`: it never
   held temporary data (the RAM-backed scratch dir does) — it is the input
   folder for `*.lib`/`*.mod`/`*.inc` model files staged next to the netlists.
   An explicit `work_dir` in `settings.json` keeps working unchanged.
 
 ### Fixed
+- A testbench referencing a macro or model file by a **relative** path failed
+  while the same path written absolutely worked. Netlists are re-written into
+  the RAM scratch dir before they run (ngspice executes from `FAST_TMP`, vacask
+  from a per-worker subdir of it), so a relative `.include` resolved against
+  the scratch dir instead of `tb/`. Include-family directives (`.include`,
+  `.inc`, `.lib`, and `include`/`ahdl_include`/`load` for vacask) are now
+  resolved to absolute paths at netlist-generation time, against the directory
+  of the testbench itself. Bare filenames are unchanged — they still come from
+  `work/` staging — and a path that doesn't exist next to the testbench now
+  fails that testbench with an error naming the path and the directory
+  searched, instead of a bare simulator crash.
 - Correlation matrix: `run_id` (an index, not data) and the per-run duration
   bookkeeping column no longer appear as correlated parameters (GUI and PDF
   report), and the axis labels are anchored so long names stay visible.

@@ -65,6 +65,11 @@ class NgspiceSimulator(BaseSimulator):
             spice_file = Path(settings.FAST_TMP) / (tb_path.stem + ".spice")
             netlist = spice_file.read_text()
 
+        # Before any chipify-owned line is spliced in, so the injected
+        # wrdata/echo text is never a rewrite candidate. run() executes the
+        # deck from FAST_TMP, where the deck's own relative paths would
+        # otherwise resolve against the scratch dir.
+        netlist = self.resolve_netlist_paths(netlist, test)
         return self._finalize_netlist(netlist, test)
 
     def _finalize_netlist(self, netlist: str, test) -> str:
