@@ -25,7 +25,7 @@ os.environ.setdefault("QT_API", "pyside6")
 # for the apt packages that provide them.
 pytest.importorskip("PySide6.QtWidgets")
 
-from PySide6.QtCore import QEventLoop, QTimer  # noqa: E402
+from PySide6.QtCore import Qt, QEventLoop, QTimer  # noqa: E402
 from PySide6.QtWidgets import QApplication  # noqa: E402
 
 
@@ -1134,3 +1134,93 @@ def test_simulation_worker_end_to_end(window, monkeypatch):
     assert window.measurements_tab.tree.topLevelItemCount() == 1
     # Buttons returned to idle state.
     assert window.btn_start.isEnabled() and not window.btn_stop.isEnabled()
+
+
+# ── Curve hover wiring ────────────────────────────────────────────────────────
+
+def _waveform_results(tmp_path):
+    """A results frame plus the per-run transient CSVs it points at."""
+    import numpy as np
+
+    t = np.linspace(0.0, 1e-3, 101)
+    for i in range(3):
+        pd.DataFrame({"time": t, "v(out)": np.full_like(t, float(i))}).to_csv(
+            tmp_path / f"run_{i:06d}__tb.csv", index=False)
+
+    class _Stim(_FakeStim):
+        def __init__(self):
+            super().__init__()
+            self.params = {"temp": [-40, 27, 100]}
+            self.tests[0].analyses = [
+                type("_An", (), {"kind": "transient", "signals": ["v(out)"]})()
+            ]
+            # Non-empty so equation_service does not fall back to the
+            # machine's settings.json (see test_transient_grouping). Not
+            # underscore-prefixed: the overlay legend warns on those.
+            self.equations = []
+            self.transient_equations = [{"name": "zero", "expr": "0"}]
+
+    df = pd.DataFrame({
+        "run_id": [0, 1, 2],
+        "temp": [-40, 27, 100],
+        "gain": [10.0, 10.2, 8.5],
+        "gain_pass": [True, True, False],
+        "global_pass": [True, True, False],
+        "sim_error": ["None"] * 3,
+    })
+    df.attrs["analysis_dirs"] = {"transient": str(tmp_path)}
+    return df, _Stim()
+
+
+def _hover_at(canvas, ax, x, y):
+    from matplotlib.backend_bases import MouseEvent
+
+    px, py = ax.transData.transform((x, y))
+    canvas.callbacks.process(
+        "motion_notify_event",
+        MouseEvent("motion_notify_event", canvas, px, py),
+    )
+
+
+def test_plots_tab_hover_names_the_run_under_the_cursor(window, tmp_path):
+    """End to end: real CSVs, the tab's own redraw, a real motion event."""
+    df, stim = _waveform_results(tmp_path)
+    window.show_results(df, stim, switch_tab=False)
+
+    pt = window.plots_tab
+    pt.signal_list.clearSelection()
+    pt.signal_list.findItems("v(out)", Qt.MatchExactly)[0].setSelected(True)
+    pt._redraw()
+    assert pt._hover_state is not None and pt._hover_state.line_map
+
+    ax = pt.canvas.figure.axes[0]
+    _hover_at(pt.canvas.canvas, ax, 0.5, 2.0)     # run 2's flat curve, x in ms
+    annot = pt._hover._bubble.annot
+    assert annot is not None and annot.get_visible()
+    assert annot.get_text().startswith("Run #000002")
+    assert "temp: 100" in annot.get_text()
+
+    # A redraw drops the tooltip rather than leaving it over erased curves.
+    pt._redraw()
+    assert pt._hover._bubble.annot is None
+
+
+def test_dashboard_cell_hovers_curves_and_points_in_the_right_mode(window, tmp_path):
+    """One canvas, two managers: exactly one answers in each mode."""
+    from chipify.gui_qt.multiplot_window import MultiPlotWindow
+
+    df, stim = _waveform_results(tmp_path)
+    window.show_results(df, stim, switch_tab=False)
+    mp = MultiPlotWindow(window.app_state, window.plot_theme)
+    try:
+        cell = mp._cells[0]
+        cell.mode_combo.setCurrentText("Plots")
+        cell.redraw(*mp.data_snapshot())
+        assert cell._curve_state() is not None
+        assert cell._hover_state() is None          # scatter manager stands down
+
+        cell.mode_combo.setCurrentText("Scatter Plot")
+        cell.redraw(*mp.data_snapshot())
+        assert cell._curve_state() is None          # curve manager stands down
+    finally:
+        mp.close()

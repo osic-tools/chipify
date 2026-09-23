@@ -9,6 +9,14 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 Preparation for the initial public release.
 
 ### Added
+- Hovering a curve in the **Plots** tab (and the dashboard's `Plots` cell)
+  draws that curve thicker and fully opaque, and shows the run's details in
+  the same tooltip the scatter plot uses: run id, the sample under the cursor,
+  PASS/FAIL, and the swept parameters. Works on all three analysis kinds,
+  including both panes of the Bode plot. With many runs overlaid the *nearest*
+  curve is picked, so pointing at an outlier answers "which run is that?"
+  without reading the legend. The highlight is undone as soon as the pointer
+  moves away or leaves the plot, so it never reaches an export.
 - Modular simulator-engine architecture (`chipify/engines/`): each simulator
   is one `BaseSimulator` class resolved through a registry, mirroring the GUI
   plugin system. New engines can be added as a single built-in module, a

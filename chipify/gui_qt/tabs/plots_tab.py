@@ -31,6 +31,7 @@ from PySide6.QtWidgets import (
 from chipify import data_loader as _dl
 from chipify import settings
 from chipify.uikit.services import transient_loader as _tl
+from chipify.uikit.services.curve_hover import CurveHoverManager, CurveHoverState
 from chipify.uikit.state import AppState
 from chipify.gui_qt.widgets.helpers import compact_combo, deferred
 from chipify.gui_qt.widgets.mpl_canvas import MplCanvas
@@ -60,9 +61,14 @@ class PlotsTab(QWidget):
         super().__init__(parent)
         self._state = app_state
         self._plot_theme = plot_theme
+        self._hover_state: CurveHoverState | None = None
 
         self._build_ui()
         self.canvas.set_background(self._plot_theme()["bg"])
+        self._hover = CurveHoverManager(
+            self.canvas.canvas, self.canvas.figure, get_state=self._curve_state,
+        )
+        self._hover.connect()
         self._state.data_changed.connect(self._on_data_changed)
 
     # ── Layout ────────────────────────────────────────────────────────────────
@@ -249,6 +255,12 @@ class PlotsTab(QWidget):
         adir = self._resolve_dir() if df is not None else ""
         signals = [i.text() for i in self.signal_list.selectedItems()]
 
+        # Every draw_fn starts with fig.clf(), so the previous curves and the
+        # tooltip anchored on them are gone: reset before drawing, and hand the
+        # new curves to the hover manager below (see curve_hover).
+        self._hover_state = None
+        self._hover.invalidate()
+
         if df is None or not adir or not signals:
             draw_fn(fig, canvas, adir, [], [], bg_color=theme["bg"], theme=theme)
             return
@@ -256,9 +268,16 @@ class PlotsTab(QWidget):
         run_ids = self._selected_run_ids(df)
         group_col = self._current_group()
         equations = self._tran_equations() if kind == "transient" else []
-        draw_fn(
+        line_map = draw_fn(
             fig, canvas, adir, run_ids, signals,
             pass_map=_tl.run_pass_map(df), bg_color=theme["bg"],
             equations=equations, theme=theme,
             group_map=_tl.run_group_map(df, group_col), group_label=group_col,
         )
+        self._hover_state = CurveHoverState(line_map, df, self._state.current_stim)
+
+    # ── Curve hover ───────────────────────────────────────────────────────────
+
+    def _curve_state(self) -> CurveHoverState | None:
+        """The overlay the tooltip describes — cached, this runs per mouse move."""
+        return self._hover_state

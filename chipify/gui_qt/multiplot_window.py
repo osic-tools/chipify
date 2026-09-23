@@ -34,6 +34,7 @@ from chipify import app_config, settings
 from chipify import data_loader as _dl
 from chipify.uikit.services import equation_service as _eq_svc
 from chipify.uikit.services import transient_loader as _tl
+from chipify.uikit.services.curve_hover import CurveHoverManager, CurveHoverState
 from chipify.uikit.services.scatter_hover import HoverState, ScatterHoverManager
 from chipify.uikit.state import AppState
 from chipify.gui_qt.services import canvas_menu
@@ -83,15 +84,22 @@ class PlotCell(QFrame):
         self._remove_cb = remove_cb
         self._sc_plot = None
         self._scatter_df = None
+        self._curve_state_obj: CurveHoverState | None = None
 
         self._build_ui()
         self.canvas.figure.add_subplot(111)
         self.canvas.set_background(self._plot_theme()["bg"])
+        # Two managers on one canvas: their get_state callbacks are mutually
+        # exclusive on the cell's mode, so only one ever answers a mouse move.
         self._hover = ScatterHoverManager(
             self.canvas.canvas, self.canvas.figure,
             get_state=self._hover_state, on_point_click=self._on_point_click,
         )
         self._hover.connect()
+        self._curve_hover = CurveHoverManager(
+            self.canvas.canvas, self.canvas.figure, get_state=self._curve_state,
+        )
+        self._curve_hover.connect()
 
     # ── Layout ────────────────────────────────────────────────────────────────
 
@@ -289,7 +297,11 @@ class PlotCell(QFrame):
         self.canvas.set_background(theme["bg"])
         fig, canvas = self.canvas.figure, self.canvas.canvas
         self._sc_plot = self._scatter_df = None
+        self._curve_state_obj = None
         self._hover.invalidate()
+        # Before the draw, not after: this also covers the except branch below,
+        # which replaces the figure with an error message.
+        self._curve_hover.invalidate()
 
         try:
             if mode == "Histogram":
@@ -357,14 +369,15 @@ class PlotCell(QFrame):
         group_col = "" if group_text in ("", "None") else group_text
         equations = _eq_svc.transient_equations(stim) if kind == "transient" else []
 
-        draw_fn(
+        line_map = draw_fn(
             self.canvas.figure, self.canvas.canvas, adir, run_ids, signals,
             pass_map=_tl.run_pass_map(df), bg_color=theme["bg"],
             equations=equations, theme=theme,
             group_map=_tl.run_group_map(df, group_col), group_label=group_col,
         )
+        self._curve_state_obj = CurveHoverState(line_map, df, stim)
 
-    # ── Scatter hover ─────────────────────────────────────────────────────────
+    # ── Scatter / curve hover ─────────────────────────────────────────────────
 
     def _hover_state(self):
         if self.mode_combo.currentText() != "Scatter Plot":
@@ -374,6 +387,11 @@ class PlotCell(QFrame):
         return HoverState(self._sc_plot, self._scatter_df,
                           self.x_combo.currentText(), self.y_combo.currentText(),
                           self._state.current_stim)
+
+    def _curve_state(self):
+        if self.mode_combo.currentText() != "Plots":
+            return None
+        return self._curve_state_obj
 
     def _on_point_click(self, row, state, _event) -> None:
         canvas_menu.show_netlist_export_menu(self, state.stim, row, templates_dir="")

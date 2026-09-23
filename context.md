@@ -35,7 +35,9 @@ uikit/                      – NO GUI-toolkit imports; unit-testable headlessly
 │   ├── measurements.py     – measurement_rows / equation_rows / worst_cases / error_rows (PASS/FAIL/ERROR stats; shared by GUI + analyzer + md/pdf exports)
 │   ├── transient_loader.py – resolve_analysis_dir, list_analysis_signals, load_analysis_df,
 │   │                         list_kind_signals, run_pass_map / run_group_map (waveform grouping)
+│   ├── hover_bubble.py     – the tooltip bubble + fmt_value, shared by both hover managers
 │   ├── scatter_hover.py    – matplotlib scatter hover/click manager
+│   ├── curve_hover.py      – waveform-curve hover: nearest-curve hit test, blitted tooltip + highlight
 │   ├── netlist_export.py   – per-sample SPICE netlist rendering (pure)
 │   ├── yaml_editor_service.py – get_params_dict, get_tests_dict, gui_repr_param, sync_form_to_yaml
 │   └── plugin_context.py   – PluginContext facade handed to tab plugins (see PLUGINS.md)
@@ -72,6 +74,7 @@ Plugins: the Qt GUI loads `QtTabPlugin`s; legacy Tk `TabPlugin`s are detected an
 | `test_plugin_context.py` | `PluginContext` facade, JSON-serialization |
 | `test_gui_qt_smoke.py` | Qt GUI smoke tests (offscreen): window, tabs, themes, worker, plugins |
 | `test_measurements_errors.py` | Per-testbench error scoping, ERROR status, `error_rows`, lost-batch rows |
+| `test_curve_hover.py` | Waveform-curve hover: nearest-curve hit test, tooltip text, redraw lifecycle |
 
 ---
 
@@ -167,6 +170,17 @@ Yield *visualisations* use `data_loader.effective_pass(df)`, not `global_pass`: 
 *   The Transient / DC sweep / Bode overlays share one colour-and-legend policy. Ungrouped, colour encodes the signal (or the run index for a single signal) and failing runs are red — unchanged.
 *   Passing `group_map` (`run_id -> value`, from `transient_loader.run_group_map`) plus `group_label` switches colour to the **group value**, line style to the signal, and turns pass/fail highlighting **off** — red would pull failing curves out of the grouping. Legend labels use `temp=27`, matching `draw_histogram`'s convention.
 *   The Plots tab and the dashboard's `Plots` cell both drive this through the same helpers; the cell's legacy `"Transient"` mode name is migrated in `apply_config`.
+
+### Waveform-curve hover (`uikit/services/curve_hover.py`)
+*   Consumes the ``line_map`` (``Line2D -> (run_id, signal)``) the three overlay plotters already return; the Plots tab and the dashboard cell cache one `CurveHoverState` per redraw and hand it over, because `get_state` runs on every mouse move.
+*   **Never** `Line2D.contains()` in a loop (~150 ms per mouse move at `RUN_CAP` runs) and **never** `canvas.draw_idle()` per event (~1 s at 500 curves — the scatter hover can afford it, an overlay cannot). Each axes gets a lazily built index of its curves in *scale space*; only the `transLimits + transAxes` affine is re-read per event, so pan/zoom/resize need no rebuild, and the bubble is blitted over a saved background. Measured: 4 ms per hover against 406 ms for one redraw.
+*   Distance is to the drawn **segment**, in **pixels**, and the *nearest* curve wins: a sparse DC sweep is hoverable between its samples, a log x axis is not measured in decades, and 500 overlapping Monte-Carlo curves do not all answer with the lowest run id.
+*   A log axis maps `x <= 0` to the sentinel `-1000`, not `-inf`, so non-positive samples are masked on the raw values before transforming — otherwise a phantom point a thousand decades left wins every hit near the axes edge. Samples either side of a NaN dropout are never joined into a segment, because matplotlib draws a gap there.
+*   `line_map` keys are the six-digit ids from the `run_<id>__<tb>.csv` filenames; the results frame's `run_id` reads back from CSV as an int. The run lookup goes through `transient_loader.pad_run_id`, as `run_pass_map` / `run_group_map` do.
+*   Both hover managers can share one canvas (the dashboard cell): their `get_state` callbacks are mutually exclusive on the cell's mode, and both are invalidated *before* each redraw, which is what also covers the cell's error branch.
+*   The hovered curve is also drawn thicker, opaque and above its neighbours. Unlike the bubble it is an **ordinary artist**, so: the blit pass redraws it over the restored background (the thicker stroke covers the thin one already there, and simply not drawing it is what un-highlights); its original linewidth/alpha/zorder are saved and put back on every exit path — miss, leave, `invalidate()`; and when a real draw catches it mid-highlight, `_on_draw` restores it, *discards* the frame it just saved and schedules one more draw, because a background with the thick curve baked in would smear it until the next redraw.
+*   The bubble is animated so ordinary draws skip it — but `savefig` draws animated artists, so leaving the canvas hides it (and restores the curve), keeping both out of `Export…`, the toolbar's own Save, and the TeX export.
+*   `HoverBubble.show` makes the annotation visible *before* measuring it: `Text.get_window_extent` reports a 1-pixel box for a hidden artist, so the edge-flip silently never fired and a tall tooltip near the top of the canvas was drawn off it.
 
 ---
 

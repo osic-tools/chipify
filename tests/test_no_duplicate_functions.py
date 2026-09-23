@@ -20,7 +20,7 @@ _ALLOWED: dict[str, str] = {
     "main": "separate entry points (cli.py, gui_qt/app.py)",
     # Same name, deliberately different behaviour: the measurements table wants
     # "-" for a missing value, the hover tooltip wants the raw text back.
-    "fmt_value": "measurements table vs scatter hover have different contracts",
+    "fmt_value": "measurements table vs hover bubble have different contracts",
 }
 
 _ROOT = pathlib.Path(__file__).resolve().parent.parent / "chipify"

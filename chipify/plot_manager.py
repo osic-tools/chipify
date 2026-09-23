@@ -954,9 +954,13 @@ class PlotManager:
                                     rasterized=(n_curves > 200), picker=4)
                 if lines:
                     line_map[lines[0]] = (run_id, f"{sig} (mag)")
-                ax_phase.plot(freq, df[ph_col], color=color, linestyle=ls,
-                              alpha=alpha, linewidth=0.8,
-                              rasterized=(n_curves > 200))
+                # The phase pane is half the plot; registering its lines too is
+                # what makes hovering there identify a run (see curve_hover).
+                ph_lines = ax_phase.plot(freq, df[ph_col], color=color, linestyle=ls,
+                                         alpha=alpha, linewidth=0.8,
+                                         rasterized=(n_curves > 200), picker=4)
+                if ph_lines:
+                    line_map[ph_lines[0]] = (run_id, f"{sig} (phase)")
                 drawn_any = True
 
         if not drawn_any:
